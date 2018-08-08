@@ -9,6 +9,7 @@ click = "*"
 
 [dev-packages]
 ipython = "*"
+setuptools = "*"
 
 [requires]
 python_version = "3.7"
