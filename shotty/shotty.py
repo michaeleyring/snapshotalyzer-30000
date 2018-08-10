@@ -1,10 +1,22 @@
 import boto3
 import botocore
 import click
+from enum import Enum
+
+# Tuple for commands. Used for logic to ensure --force command is used when
+# no --project value is passed. Only in use for instances commands
+aws_commands = ('stop','start','snapshot','reboot')
 
 session = boto3.Session(profile_name='shotty')
 ec2 = session.resource('ec2')
 
+# filter_instances
+# Filters ec2 instances based on project value (which ties to Project tag) or all
+# if no project value is passed
+# Inputs
+#   project = The project name to filter Project tags by
+# Returns
+#   A list of filtered instances
 def filter_instances(project):
     instances = []
 
@@ -19,6 +31,54 @@ def filter_instances(project):
 def has_pending_snapshot(volume):
     snapshots = list(volume.snapshots.all())
     return snapshots and snapshots[0].state == 'pending'
+
+# get_project_name
+# For the passed instance value, determine the value of the Project tag for that
+# ec2 instances
+# Inputs
+#   instance - The instance we are checking the tag for
+# Returns
+#   The tag name if present, None if not
+def get_project_name(instance):
+    tagval = None
+
+    # iterate through the instances tags to find Project
+    for tags in ec2instance.tags:
+        if tags["Key"] == 'Project':
+            tagval = tags["Value"]
+            print("The project is {0}...".format(tagval))
+            break
+        else: # if not the Project tag, keep iterating
+            continue
+
+    return tagval
+
+# For instance stop, start, snapshot and reboot commands, do not execute
+# command without a --project parameter unless the --force option is specified
+# Inputs:
+#   command - the command requested. Only certain cammands require force, keep
+#       everything in this block
+#   project - parameter passed for specifying a project tag Value
+#   force - parameter passed for the --force command, required if no project
+#       param passed
+# Returns
+#   True - The requested instances command can be executed
+#   False - The force command is required to execute, do not execute
+def can_process_command(command, project, force):
+    can_process = False # variable to identify if the command can be executed, init to False
+
+    # check to see if the command being applied is in the list that has a force restriction
+    if (command in aws_commands)
+        # if there is no project tag specified and no force tag, we cannot execute
+        if (not project) and (not force):
+            # print("Cannot execute this command without --force since --project is not set")
+            can_process = False
+        else:
+            can_process = True
+    else: # if not in the list of commands that have a force restriction, then it is ok
+        can_process = True
+
+    return can_process_command
 
 @click.group()
 def cli():
@@ -36,6 +96,12 @@ def list_snapshots(project, list_all):
 
     instances = filter_instances(project)
     for i in instances:
+        tagname = get_project_name(i)
+        if tagname:
+            print("The project name was: {0}.".format(tagname))
+        else:
+            print("There was no project for this one: {0}".format(i))
+
         for v in i.volumes.all():
             for s in v.snapshots.all():
                 print(", ".join((
@@ -71,7 +137,7 @@ def list_volumes(project):
                 v.encrypted and "Encrypted" or "Not Encrypted"
                 )))
 
-        return
+    return
 
 @cli.group('instances')
 def instances():
@@ -81,31 +147,39 @@ def instances():
     help="Create snapshots of all volumes")
 @click.option('--project', default=None,
     help="Only instances for project (tag Project:<name>)")
-def create_snapshots(project):
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Force operation if the --project param was not specified.")
+def create_snapshots(project, force):
     "Create snapshots for EC2 intances"
 
-    instances = filter_instances(project)
+    # the snapshot command requires --force if no project tag was specified
+    if (not can_process_command('snapshot', project, force))
+        print("Cannot execute this command without --force since --project is not set")
+    else:
+        # We can proceed and try to execute the snapshot
+        instances = filter_instances(project)
+        for i in instances:
+            print("Stopping {0}...".format(i.id))
+                try:
+                    i.stop()
+                    i.wait_until_stopped()
+                except botocore.exceptions.ClientError as e:
+                    print("Could not stop {0}. ".format(i.id) + str(e))
+                    continue
 
-    for i in instances:
-        print("Stopping {0}...".format(i.id))
+            for v in i.volumes.all():
+                if has_pending_snapshot(v):
+                    print("  Skipping {0}, snapshot already in progress")
+                    continue
 
-        i.stop()
-        i.wait_until_stopped()
+                print("Creating snapshot of {0}".format(v.id))
+                v.create_snapshot(Description="Created by SnapshotAlyzer 30000")
 
-        for v in i.volumes.all():
-            if has_pending_snapshot(v):
-                print("  Skipping {0}, snapshot already in progress")
-                continue
+            print("Starting {0}...".format(i.id))
 
-            print("Creating snapshot of {0}".format(v.id))
-            v.create_snapshot(Description="Created by SnapshotAlyzer 30000")
-
-        print("Starting {0}...".format(i.id))
-
-        i.start()
-        i.wait_until_running()
-
-    print("Job's done!")
+            i.start()
+            i.wait_until_running()
+            print("Job's done!")
 
     return
 
@@ -132,51 +206,66 @@ def list_instances(project):
 @instances.command('stop')
 @click.option('--project', default=None,
     help='Only instances for project')
-def stop_instances(project):
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Force operation if the --project param was not specified.")
+def stop_instances(project, force):
     "Stop EC2 instances"
 
     instances = filter_instances(project)
     for i in instances:
         print("Stopping {0}...".format(i.id))
-        try:
-            i.stop()
-        except botocore.exceptions.ClientError as e:
-            print("Could not stop {0}. ".format(i.id) + str(e))
-            continue
+        if (can_process_command('stop', project, force))
+            try:
+                i.stop()
+            except botocore.exceptions.ClientError as e:
+                print("Could not stop {0}. ".format(i.id) + str(e))
+                continue
+        else:
+            print("Cannot execute this command without --force since --project is not set")
 
     return
 
 @instances.command('start')
 @click.option('--project', default=None,
     help='Only instances for project')
-def stop_instances(project):
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Force operation if the --project param was not specified.")
+def stop_instances(project, force):
     "Start EC2 instances"
 
     instances = filter_instances(project)
     for i in instances:
         print("Starting {0}...".format(i.id))
-        try:
-            i.start()
-        except botocore.exceptions.ClientError as e:
-            print("Could not start {0}. ".format(i.id) + str(e))
-            continue
+        if (can_process_command('start', project, force))
+            try:
+                i.stop()
+            except botocore.exceptions.ClientError as e:
+                print("Could not start {0}. ".format(i.id) + str(e))
+                continue
+        else:
+            print("Cannot execute this command without --force since --project is not set")
 
     return
 
 @instances.command('reboot')
 @click.option('--project', default=None,
     help='Only instances for project')
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Force operation if the --project param was not specified.")
 def reboot_instances(project):
     "Reboot EC2 instances"
 
     instances = filter_instances(project)
     for i in instances:
         print("Rebooting {0}...".format(i.id))
-        try:
-            i.reboot()
-        except botocore.exceptions.ClientError as e:
-            print("Could not reboot {0}. ".format(i.id) + str(e))
-            continue
+        if (can_process_command('reboot', project, force))
+            try:
+                i.stop()
+            except botocore.exceptions.ClientError as e:
+                print("Could not reboot {0}. ".format(i.id) + str(e))
+                continue
+        else:
+            print("Cannot execute this command without --force since --project is not set")
 
     return
 
