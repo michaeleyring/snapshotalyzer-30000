@@ -129,7 +129,7 @@ def execute_instance_command(command, project, force, profile, command_executing
                     # note snapshot command has different logic and is covered in a separate function
                     raise ValueError("Value Error: command passed to execute_instance_command must be in {0}".format(aws_commands))
 
-            # cover exceptions (stop a stopped instance, etc)
+            # cover exceptions
             except botocore.exceptions.ClientError as e:
                 print("Could not {0} {1}: ".format(command, i.id) + str(e))
                 continue
@@ -205,11 +205,13 @@ def instances():
     help="Only instances for project (tag Project:<name>)")
 @click.option('--force', 'force', default=False, is_flag=True,
     help="Force operation if the --project param was not specified.")
-def create_snapshots(project, force):
+@click.option('--profile', 'profile', default=None,
+    help="Specify a profile to use. Profile Kyle will avoid force restriction")
+def create_snapshots(project, force, profile):
     "Create snapshots for EC2 intances"
 
     # the snapshot command requires --force if no project tag was specified
-    if (not can_process_command('snapshot', project, force)):
+    if (not can_process_command('snapshot', project, force, profile)):
         print("Cannot execute this command without --force since --project is not set")
     else:
         # We can proceed and try to execute the snapshot
@@ -222,7 +224,7 @@ def create_snapshots(project, force):
                 # stop the instance prior to starting the snapshot
                 i.stop()
                 i.wait_until_stopped()
-            # catch execptions if there was an issue (stopped, etc)
+            # catch execptions if there was an issue
             except botocore.exceptions.ClientError as e:
                 print("Could not stop {0}: ".format(i.id) + str(e))
                 continue
@@ -238,7 +240,12 @@ def create_snapshots(project, force):
                 # All was well, create the snapshot. Leave reference that the snapshots
                 # came from this utility
                 print("Creating snapshot of {0}".format(v.id))
-                v.create_snapshot(Description="Created by SnapshotAlyzer 30000")
+                try:
+                    v.create_snapshot(Description="Created by SnapshotAlyzer 30000")
+                # catch exceptions
+                except botocore.exceptions.ClientError as e:
+                    print("Could not create snapshot for {0}:".format(v.id) + str(e))
+                    continue
 
             # Snapshot was started, notify the user and restart the instance
             print("Starting {0}...".format(i.id))
