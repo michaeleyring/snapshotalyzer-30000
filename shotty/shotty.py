@@ -53,6 +53,7 @@ def get_project_name(instance):
 
     return tagval
 
+# can_process_command
 # For instance stop, start, snapshot and reboot commands, do not execute
 # command without a --project parameter unless the --force option is specified
 # Inputs:
@@ -61,16 +62,18 @@ def get_project_name(instance):
 #   project - parameter passed for specifying a project tag Value
 #   force - parameter passed for the --force command, required if no project
 #       param passed
+#   profile - Which profile. A profile of Kyle will disable force restrictions
 # Returns
 #   True - The requested instances command can be executed
 #   False - The force command is required to execute, do not execute
-def can_process_command(command, project, force):
+def can_process_command(command, project, force, profile):
     can_process = False # variable to identify if the command can be executed, init to False
 
     # check to see if the command being applied is in the list that has a force restriction
     if (command in aws_commands):
         # if there is no project tag specified and no force tag, we cannot execute
-        if (not project) and (not force):
+        # if the profile is Kyle, force logic is disabled
+        if ((not project) and (not force)) and (profile != 'Kyle'):
             # print("Cannot execute this command without --force since --project is not set")
             can_process = False
         else:
@@ -80,12 +83,60 @@ def can_process_command(command, project, force):
 
     return can_process
 
+# execute_instance_command
+# Centralize execution of instance commands for stop, start, reboot
+# The logic between these is virtually identical except for the command and messaage
+# This function will help ensure all three are in synch
+# See instances snapshot as that has separate logic so is not included here
+# Inputs
+#   command - The command we are executing (see aws_commands for valid values)
+#   project - Project tag value to filter on (if present)
+#   force - If the --force value was passed, required if no project value specified (depenedent on profile)
+#   profile - Profile Kyle will disable force restrictions
+#   command_executing_desc - Text for action description (Starting, Stopping, Rebooting)
+# Returns:
+#   Nothing
+def execute_instance_command(command, project, force, profile, command_executing_desc):
+    # check if the command requires --force if no project tag was specified (or profile disables)
+    if (not can_process_command(command, project, force, profile)):
+        print("Cannot execute instances {0} without --force since --project is not set".format(command))
+        print("Alternately --profile=Kyle will disable --force restrictions")
+    else:
+        instances = filter_instances(project)
+
+        for i in instances:
+            print("{0} {1}...".format(command_executing_desc, i.id))
+            try:
+                # reboot instance
+                if (command == 'reboot'):
+                    i.reboot()
+                # stop the instance
+                elif (command == 'stop'):
+                    i.stop()
+                # start the instanc
+                elif (command == 'start'):
+                    i.start()
+                else:
+                    # if we got here then the value passed was not what we expected and code fix is needed
+                    # note snapshot command has different logic and is covered in a separate function
+                    raise ValueError("Value Error: command passed to execute_instance_command must be in {0}".format(aws_commands))
+
+            # cover exceptions (stop a stopped instance, etc)
+            except botocore.exceptions.ClientError as e:
+                print("Could not {0} {1}: ".format(command, i.id) + str(e))
+                continue
+
+    return
+
 @click.group()
 def cli():
     """Shotty manages snapshots"""
+
 @cli.group('snapshots')
 def snapshots():
     """Commands for snapshots"""
+
+# Snapshots list command
 @snapshots.command('list')
 @click.option('--project', default=None,
     help="Only snapshots for project (tag Project:<name>)")
@@ -96,12 +147,6 @@ def list_snapshots(project, list_all):
 
     instances = filter_instances(project)
     for i in instances:
-        tagname = get_project_name(i)
-        if tagname:
-            print("The project name was: {0}.".format(tagname))
-        else:
-            print("There was no project for this one: {0}".format(i))
-
         for v in i.volumes.all():
             for s in v.snapshots.all():
                 print(", ".join((
@@ -120,6 +165,8 @@ def list_snapshots(project, list_all):
 @cli.group('volumes')
 def volumes():
     """Commands for volumes"""
+
+# Volumes list command
 @volumes.command('list')
 @click.option('--project', default=None,
     help="Only volumes for project (tag Project:<name>)")
@@ -143,6 +190,7 @@ def list_volumes(project):
 def instances():
     """Commands for instances"""
 
+# Instances snapshot command
 @instances.command('snapshot',
     help="Create snapshots of all volumes")
 @click.option('--project', default=None,
@@ -168,7 +216,7 @@ def create_snapshots(project, force):
                 i.wait_until_stopped()
             # catch execptions if there was an issue (stopped, etc)
             except botocore.exceptions.ClientError as e:
-                print("Could not stop {0}. ".format(i.id) + str(e))
+                print("Could not stop {0}: ".format(i.id) + str(e))
                 continue
 
             # For each volume in the current instance
@@ -186,13 +234,13 @@ def create_snapshots(project, force):
 
             # Snapshot was started, notify the user and restart the instance
             print("Starting {0}...".format(i.id))
-            # TODO: Add exception handling
             i.start()
             i.wait_until_running()
         print("Job's done!")
 
     return
 
+# Instances list command
 @instances.command('list')
 @click.option('--project', default=None,
     help="Only instances for project (tag Project:<name>)")
@@ -213,69 +261,51 @@ def list_instances(project):
 
     return
 
+# Instances stop command
 @instances.command('stop')
 @click.option('--project', default=None,
     help='Only instances for project')
 @click.option('--force', 'force', default=False, is_flag=True,
     help="Force operation if the --project param was not specified.")
-def stop_instances(project, force):
+@click.option('--profile', 'profile', default=None,
+    help="Specify a profile to use. Profile Kyle will avoid force restriction")
+def stop_instances(project, force, profile):
     "Stop EC2 instances"
 
-    instances = filter_instances(project)
-    for i in instances:
-        print("Stopping {0}...".format(i.id))
-        if (can_process_command('stop', project, force)):
-            try:
-                i.stop()
-            except botocore.exceptions.ClientError as e:
-                print("Could not stop {0}. ".format(i.id) + str(e))
-                continue
-        else:
-            print("Cannot execute this command without --force since --project is not set")
+    # Verify we can execute the command and if so, execute
+    execute_instance_command('stop', project, force, profile, 'Stopping')
 
     return
 
+# Instances start command
 @instances.command('start')
 @click.option('--project', default=None,
     help='Only instances for project')
 @click.option('--force', 'force', default=False, is_flag=True,
     help="Force operation if the --project param was not specified.")
-def stop_instances(project, force):
+@click.option('--profile', 'profile', default=None,
+    help="Specify a profile to use. Profile Kyle will avoid force restriction")
+def start_instances(project, force, profile):
     "Start EC2 instances"
 
-    instances = filter_instances(project)
-    for i in instances:
-        print("Starting {0}...".format(i.id))
-        if (can_process_command('start', project, force)):
-            try:
-                i.start()
-            except botocore.exceptions.ClientError as e:
-                print("Could not start {0}. ".format(i.id) + str(e))
-                continue
-        else:
-            print("Cannot execute this command without --force since --project is not set")
+    # Verify we can execute the command and if so, execute
+    execute_instance_command('start', project, force, profile, 'Starting')
 
     return
 
+# Instance reboot command
 @instances.command('reboot')
 @click.option('--project', default=None,
     help='Only instances for project')
 @click.option('--force', 'force', default=False, is_flag=True,
     help="Force operation if the --project param was not specified.")
-def reboot_instances(project, force):
+@click.option('--profile', 'profile', default=None,
+    help="Specify a profile to use. Profile Kyle will avoid force restriction")
+def reboot_instances(project, force, profile):
     "Reboot EC2 instances"
 
-    instances = filter_instances(project)
-    for i in instances:
-        print("Rebooting {0}...".format(i.id))
-        if (can_process_command('reboot', project, force)):
-            try:
-                i.reboot()
-            except botocore.exceptions.ClientError as e:
-                print("Could not reboot {0}. ".format(i.id) + str(e))
-                continue
-        else:
-            print("Cannot execute this command without --force since --project is not set")
+    # Verify we can execute the command and if so, execute
+    execute_instance_command('reboot', project, force, profile, 'Rebooting')
 
     return
 
