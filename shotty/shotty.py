@@ -28,8 +28,16 @@ def filter_instances(project):
 
     return instances
 
+# has_pending_snapshot
+# Encapsulates check to see if there is a pending snapshots
+# Inputs:
+#   volume - The volume to checking
+# Returns
+#   True - There are snapshots pending for this volumes
+#   False - There are no snapshots pending for this volume
 def has_pending_snapshot(volume):
     snapshots = list(volume.snapshots.all())
+
     return snapshots and snapshots[0].state == 'pending'
 
 # get_project_name
