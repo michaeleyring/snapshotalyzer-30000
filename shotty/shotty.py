@@ -218,6 +218,8 @@ def create_snapshots(project, force, profile):
         instances = filter_instances(project) # only operate on project tagged instances if passed
         # For each of the filtered instances (or all if the filter had no effect)
         for i in instances:
+            instance_was_running = (i.state['Name'] == 'running')
+            print("Instance {0} was in this state: {1}".format(i.id, i.state['Name']))
             # Notify the user which instance we are stopping
             print("Stopping {0}...".format(i.id))
             try:
@@ -248,9 +250,14 @@ def create_snapshots(project, force, profile):
                     continue
 
             # Snapshot was started, notify the user and restart the instance
-            print("Starting {0}...".format(i.id))
-            i.start()
-            i.wait_until_running()
+            # only start the instance if it was running originally
+            if (instance_was_running):
+                print("Starting {0}...".format(i.id))
+                i.start()
+                i.wait_until_running()
+            else:
+                print("Instance {0} was not running originally so is not restarted".format(i.id))
+
         print("Job's done!")
 
     return
