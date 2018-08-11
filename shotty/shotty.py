@@ -68,7 +68,7 @@ def can_process_command(command, project, force):
     can_process = False # variable to identify if the command can be executed, init to False
 
     # check to see if the command being applied is in the list that has a force restriction
-    if (command in aws_commands)
+    if (command in aws_commands):
         # if there is no project tag specified and no force tag, we cannot execute
         if (not project) and (not force):
             # print("Cannot execute this command without --force since --project is not set")
@@ -78,7 +78,7 @@ def can_process_command(command, project, force):
     else: # if not in the list of commands that have a force restriction, then it is ok
         can_process = True
 
-    return can_process_command
+    return can_process
 
 @click.group()
 def cli():
@@ -153,33 +153,43 @@ def create_snapshots(project, force):
     "Create snapshots for EC2 intances"
 
     # the snapshot command requires --force if no project tag was specified
-    if (not can_process_command('snapshot', project, force))
+    if (not can_process_command('snapshot', project, force)):
         print("Cannot execute this command without --force since --project is not set")
     else:
         # We can proceed and try to execute the snapshot
-        instances = filter_instances(project)
+        instances = filter_instances(project) # only operate on project tagged instances if passed
+        # For each of the filtered instances (or all if the filter had no effect)
         for i in instances:
+            # Notify the user which instance we are stopping
             print("Stopping {0}...".format(i.id))
-                try:
-                    i.stop()
-                    i.wait_until_stopped()
-                except botocore.exceptions.ClientError as e:
-                    print("Could not stop {0}. ".format(i.id) + str(e))
-                    continue
+            try:
+                # stop the instance prior to starting the snapshot
+                i.stop()
+                i.wait_until_stopped()
+            # catch execptions if there was an issue (stopped, etc)
+            except botocore.exceptions.ClientError as e:
+                print("Could not stop {0}. ".format(i.id) + str(e))
+                continue
 
+            # For each volume in the current instance
             for v in i.volumes.all():
+                # if a snapshot has already been requested or in progress, don't bother
                 if has_pending_snapshot(v):
+                    # notify the user the decision that was made and a new snapshot will not be made
                     print("  Skipping {0}, snapshot already in progress")
                     continue
 
+                # All was well, create the snapshot. Leave reference that the snapshots
+                # came from this utility
                 print("Creating snapshot of {0}".format(v.id))
                 v.create_snapshot(Description="Created by SnapshotAlyzer 30000")
 
+            # Snapshot was started, notify the user and restart the instance
             print("Starting {0}...".format(i.id))
-
+            # TODO: Add exception handling
             i.start()
             i.wait_until_running()
-            print("Job's done!")
+        print("Job's done!")
 
     return
 
@@ -214,7 +224,7 @@ def stop_instances(project, force):
     instances = filter_instances(project)
     for i in instances:
         print("Stopping {0}...".format(i.id))
-        if (can_process_command('stop', project, force))
+        if (can_process_command('stop', project, force)):
             try:
                 i.stop()
             except botocore.exceptions.ClientError as e:
@@ -236,9 +246,9 @@ def stop_instances(project, force):
     instances = filter_instances(project)
     for i in instances:
         print("Starting {0}...".format(i.id))
-        if (can_process_command('start', project, force))
+        if (can_process_command('start', project, force)):
             try:
-                i.stop()
+                i.start()
             except botocore.exceptions.ClientError as e:
                 print("Could not start {0}. ".format(i.id) + str(e))
                 continue
@@ -252,15 +262,15 @@ def stop_instances(project, force):
     help='Only instances for project')
 @click.option('--force', 'force', default=False, is_flag=True,
     help="Force operation if the --project param was not specified.")
-def reboot_instances(project):
+def reboot_instances(project, force):
     "Reboot EC2 instances"
 
     instances = filter_instances(project)
     for i in instances:
         print("Rebooting {0}...".format(i.id))
-        if (can_process_command('reboot', project, force))
+        if (can_process_command('reboot', project, force)):
             try:
-                i.stop()
+                i.reboot()
             except botocore.exceptions.ClientError as e:
                 print("Could not reboot {0}. ".format(i.id) + str(e))
                 continue
