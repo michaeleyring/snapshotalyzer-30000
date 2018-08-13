@@ -153,17 +153,22 @@ def snapshots():
 def list_snapshots(project, list_all):
     "List EC2 snapshots"
 
+    # Filter instance list to look for snapshots by project tag references if present
     instances = filter_instances(project)
+
+    # For all in scope instances
     for i in instances:
+        # Look at all volumes for the selected instance
         for v in i.volumes.all():
+            # Iterate through all snapshots for the volume
             for s in v.snapshots.all():
                 print(", ".join((
-                    s.id,
-                    v.id,
-                    i.id,
-                    s.state,
-                    s.progress,
-                    s.start_time.strftime("%c")
+                    s.id, # snapshot ID
+                    v.id, # Volume ID
+                    i.id, # Instance ID
+                    s.state, # state of the snapshot
+                    s.progress, # Progress of the snapshot
+                    s.start_time.strftime("%c") # when the snapshot was started
                     )))
 
                 if s.state == 'completed' and not list_all: break
