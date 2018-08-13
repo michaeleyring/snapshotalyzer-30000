@@ -186,14 +186,18 @@ def volumes():
 def list_volumes(project):
     "List EC2 volumes"
 
+    # Filter instances based on project tags, if present
     instances = filter_instances(project)
+
+    # For all selected instances
     for i in instances:
+        # Iterate through all volumes for the instance
         for v in i.volumes.all():
             print(", ".join((
-                v.id,
-                i.id,
-                v.state,
-                str(v.size) + "GiB",
+                v.id, # volume ID
+                i.id, # instance ID
+                v.state, # volume state
+                str(v.size) + "GiB", # size of volume
                 v.encrypted and "Encrypted" or "Not Encrypted"
                 )))
 
