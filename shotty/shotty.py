@@ -261,9 +261,9 @@ def create_snapshots(project, force, profile):
             # Snapshot was started, notify the user and restart the instance
             # only start the instance if it was running originally
             if (instance_was_running):
-                print("Starting {0}...".format(i.id))
-                i.start()
-                i.wait_until_running()
+                print("Instance {0} was running previously, restarting...".format(i.id))
+                i.start() # start the instance
+                i.wait_until_running() # wait for the instance to start before moving on
             else:
                 print("Instance {0} was not running originally so is not restarted".format(i.id))
 
@@ -278,17 +278,20 @@ def create_snapshots(project, force, profile):
 def list_instances(project):
     "List EC2 instances"
 
+    # Filter instances based on Project tag, if present
     instances = filter_instances(project)
 
+    # Iterate through all filtered instances
     for i in instances:
+            # pull tag values for the instance
             tags = { t['Key']: t['Value'] for t in i.tags or [] }
             print(', '.join((
-            i.id,
-            i.instance_type,
-            i.placement['AvailabilityZone'],
-            i.state['Name'],
-            i.public_dns_name,
-            tags.get('Project', '<no project>'))))
+            i.id, # instance ID
+            i.instance_type, # instance type
+            i.placement['AvailabilityZone'], # instance availability zone
+            i.state['Name'], # current instance state
+            i.public_dns_name, # public dns name for instance
+            tags.get('Project', '<no project>')))) # Project tag if present
 
     return
 
